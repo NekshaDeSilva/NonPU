@@ -1,0 +1,104 @@
+`timescale 1ns / 1ps
+
+module activitymonitor #(
+    parameter integer GRID_W = 16,
+    parameter integer GRID_H  = 16,
+    parameter integer TILE_W = 4,
+    parameter integer TILE_H = 4,
+    parameter integer NEURON_ADDR_WIDTH  = 8,
+    parameter integer ACTIVITY_WIDTH = 16,
+    parameter integer THRESHOLD = 16
+)(
+    input wire clk,
+    input wire  rst,
+
+    input wire spike_valid,
+    input wire [NEURON_ADDR_WIDTH-1:0]  spike_idx,
+
+    input wire frame_tick,
+
+    output reg  event_valid,
+    output reg [7:0] event_tile_id,
+    output reg [ACTIVITY_WIDTH-1:0]  event_activity
+);
+
+    localparam integer TILES_W = GRID_W /  TILE_W;
+    localparam integer TILES_H = GRID_H / TILE_H;
+    localparam integer NUM_TILES  = TILES_W * TILES_H;
+
+    localparam integer TILE_ADDR_WIDTH = 8;
+
+    reg [ACTIVITY_WIDTH-1:0] tile_count [0:NUM_TILES-1];
+
+    integer i;
+
+    wire [NEURON_ADDR_WIDTH-1:0] idx  = spike_idx;
+
+    wire [NEURON_ADDR_WIDTH-1:0] y = idx /  GRID_W;
+    wire [NEURON_ADDR_WIDTH-1:0] x = idx % GRID_W;
+
+    wire [NEURON_ADDR_WIDTH-1:0] tile_y  = y / TILE_H;
+    wire [NEURON_ADDR_WIDTH-1:0] tile_x = x / TILE_W;
+
+    wire [TILE_ADDR_WIDTH-1:0] tile_id_wire = tile_y * TILES_W  + tile_x;
+
+    localparam [1:0] ST_IDLE = 2'd0;
+    localparam [1:0]  ST_SCAN = 2'd1;
+
+    reg [1:0] state;
+    reg [TILE_ADDR_WIDTH-1:0]  scan_idx;
+
+    always @(posedge clk) begin
+        if (rst) begin
+            for (i = 0; i < NUM_TILES; i = i+1) begin
+                tile_count[i] <= {ACTIVITY_WIDTH{1'b0}};
+            end
+            state <=  ST_IDLE;
+            scan_idx <= {TILE_ADDR_WIDTH{1'b0}};
+            event_valid <=  1'b0;
+            event_tile_id <= 8'd0;
+            event_activity <= {ACTIVITY_WIDTH{1'b0}};
+        end else begin
+            event_valid <= 1'b0;
+
+            if (spike_valid) begin
+                if (tile_count[tile_id_wire] != {ACTIVITY_WIDTH{1'b1}})
+                    tile_count[tile_id_wire] <= tile_count[tile_id_wire]  + 1'b1;
+            end
+
+            case (state)
+                ST_IDLE: begin
+                    if (frame_tick) begin
+                        scan_idx <=  0;
+                        state <= ST_SCAN;
+                    end
+                end
+
+                ST_SCAN: begin
+                    if (tile_count[scan_idx] >  THRESHOLD) begin
+                        event_valid <= 1'b1;
+                        event_tile_id <=  scan_idx[7:0];
+                        event_activity <= tile_count[scan_idx];
+
+                        tile_count[scan_idx] <= tile_count[scan_idx]  >> 1;
+                    end else begin
+                        if (tile_count[scan_idx] != {ACTIVITY_WIDTH{1'b0}})
+                            tile_count[scan_idx] <=  tile_count[scan_idx] - 1'b1;
+                    end
+
+                    if (scan_idx == NUM_TILES - 1) begin
+                        scan_idx <= 0;
+                        state <=  ST_IDLE;
+                    end else begin
+                        scan_idx <= scan_idx + 1'b1;
+                    end
+                end
+
+                default: begin
+                    state <= ST_IDLE;
+                end
+            endcase
+        end
+    end
+
+endmodule

@@ -1,0 +1,205 @@
+`timescale 1ns / 1ps
+
+module tb_nonpu;
+
+    localparam integer WIDTH = 32;
+    localparam integer FRAC  = 16;
+    localparam integer GRID_W = 4;
+    localparam integer GRID_H  = 4;
+    localparam integer NEURONS = GRID_W *  GRID_H;
+    localparam integer TILE_W = 2;
+    localparam integer TILE_H = 2;
+
+    localparam integer NEURON_ADDR_WIDTH  = 8;
+
+    localparam integer ACTIVITY_WIDTH = 16;
+
+    reg clk;
+    reg  rst;
+    reg step_en;
+
+    wire spike_valid_w;
+    wire [NEURON_ADDR_WIDTH-1:0]  spike_idx_w;
+    wire signed [WIDTH-1:0] v_debug_w;
+    wire frame_tick_w;
+    wire [7:0]  tile_id_query_w;
+
+    wire event_valid_w;
+    wire [7:0] event_tile_id_w;
+    wire [ACTIVITY_WIDTH-1:0]  event_activity_w;
+
+    wire signed [WIDTH-1:0] bias_out_w;
+
+    wire fb_we_w;
+    wire [NEURON_ADDR_WIDTH-1:0]  fb_addr_w;
+    wire [7:0] fb_data_w;
+
+    reg [NEURON_ADDR_WIDTH-1:0] fb_read_addr_r;
+    wire [7:0]  fb_pixel_out_w;
+
+    integer i;
+
+    initial begin
+        clk = 1'b0;
+        forever #5 clk =  ~clk;
+    end
+
+    sheet #(
+        .WIDTH(WIDTH),
+        .FRAC(FRAC),
+        .GRID_W(GRID_W),
+        .GRID_H(GRID_H),
+        .NEURONS(NEURONS),
+        .NEURON_ADDR_WIDTH(NEURON_ADDR_WIDTH),
+        .TILE_W(TILE_W),
+        .TILE_H(TILE_H)
+    ) sheet_inst (
+        .clk(clk),
+        .rst(rst),
+        .step_en(step_en),
+        .bias_in(bias_out_w),
+        .spike_valid(spike_valid_w),
+        .spike_idx(spike_idx_w),
+        .v_debug(v_debug_w),
+        .frame_tick(frame_tick_w),
+        .tile_id_query(tile_id_query_w)
+    );
+
+    activitymonitor #(
+        .GRID_W(GRID_W),
+        .GRID_H(GRID_H),
+        .TILE_W(TILE_W),
+        .TILE_H(TILE_H),
+        .NEURON_ADDR_WIDTH(NEURON_ADDR_WIDTH),
+        .ACTIVITY_WIDTH(ACTIVITY_WIDTH),
+        .THRESHOLD(8)
+    ) activitymonitor_inst (
+        .clk(clk),
+        .rst(rst),
+        .spike_valid(spike_valid_w),
+        .spike_idx(spike_idx_w),
+        .frame_tick(frame_tick_w),
+        .event_valid(event_valid_w),
+        .event_tile_id(event_tile_id_w),
+        .event_activity(event_activity_w)
+    );
+
+    superneuron #(
+        .WIDTH(WIDTH),
+        .FRAC(FRAC),
+        .GRID_W(GRID_W),
+        .GRID_H(GRID_H),
+        .TILE_W(TILE_W),
+        .TILE_H(TILE_H),
+        .ACTIVITY_WIDTH(ACTIVITY_WIDTH),
+        .BIAS_WIDTH(WIDTH),
+        .G_WIDTH(32)
+    ) superneuron_inst (
+        .clk(clk),
+        .rst(rst),
+        .event_valid(event_valid_w),
+        .event_tile_id(event_tile_id_w),
+        .event_activity(event_activity_w),
+        .tile_id_query(tile_id_query_w),
+        .bias_out(bias_out_w)
+    );
+
+    spike2letter #(
+        .WIDTH(WIDTH),
+        .FRAC(FRAC),
+        .NEURON_ADDR_WIDTH(NEURON_ADDR_WIDTH)
+    ) spike2letter_inst (
+        .clk(clk),
+        .rst(rst),
+        .spike_valid(spike_valid_w),
+        .neuron_idx(spike_idx_w),
+        .v_in(v_debug_w),
+        .fb_we(fb_we_w),
+        .fb_addr(fb_addr_w),
+        .fb_data(fb_data_w)
+    );
+
+    fb_ram #(
+        .DEPTH(NEURONS),
+        .ADDR_WIDTH(NEURON_ADDR_WIDTH)
+    ) fb_ram_inst (
+        .clk_a(clk),
+        .we_a(fb_we_w),
+        .addr_a(fb_addr_w),
+        .data_in_a(fb_data_w),
+        .clk_b(clk),
+        .addr_b(fb_read_addr_r),
+        .data_out_b(fb_pixel_out_w)
+    );
+
+    function signed [WIDTH-1:0] to_fixed;
+        input real r;
+        begin
+            to_fixed = $rtoi(r * (1 <<  FRAC));
+        end
+    endfunction
+
+    integer step;
+    integer x, y;
+
+    initial begin
+        $dumpfile("tb_nonpu.vcd");
+        $dumpvars(0,  tb_nonpu);
+
+        rst = 1'b1;
+        step_en =  1'b0;
+        fb_read_addr_r = {NEURON_ADDR_WIDTH{1'b0}};
+
+        repeat (10) @(posedge clk);
+
+        rst <= 1'b0;
+        step_en <=  1'b1;
+
+        repeat (5) @(posedge clk);
+
+        for (i = 0; i < NEURONS; i = i+1) begin
+            tb_nonpu.sheet_inst.I_image_mem[i] = to_fixed(0.0);
+        end
+
+        tb_nonpu.sheet_inst.I_image_mem[0*GRID_W + 0] =  to_fixed(10.0);
+        tb_nonpu.sheet_inst.I_image_mem[0*GRID_W + 1] = to_fixed(10.0);
+        tb_nonpu.sheet_inst.I_image_mem[1*GRID_W + 0] = to_fixed(10.0);
+        tb_nonpu.sheet_inst.I_image_mem[1*GRID_W + 1] =  to_fixed(10.0);
+
+        $display("Initialized I_image_mem with a 'bright patch' in tile 0.");
+
+        for (step = 0; step < 400; step = step+1) begin
+            @(posedge clk);
+
+            if (spike_valid_w) begin
+                $display("t=%0d, neuron=%0d, spike=1, v=%0d, bias=%0d",
+                         step,
+                         spike_idx_w,
+                         v_debug_w,
+                         bias_out_w);
+            end
+
+            if (event_valid_w) begin
+                $display("t=%0d, TILE EVENT: tile=%0d, activity=%0d, bias_sample=%0d",
+                         step,
+                         event_tile_id_w,
+                         event_activity_w,
+                         bias_out_w);
+            end
+        end
+
+        $display("\nFinal framebuffer snapshot (4x4, grayscale 0..255):");
+        for (y = 0; y < GRID_H; y = y+1) begin
+            for (x = 0; x < GRID_W; x = x + 1) begin
+                fb_read_addr_r = y*GRID_W +  x;
+                @(posedge clk);
+                $write("%3d ", fb_pixel_out_w);
+            end
+            $write("\n");
+        end
+
+        $display("\ntb_nonpu: simulation finished.");
+        $finish;
+    end
+
+endmodule

@@ -1,0 +1,134 @@
+`timescale 1ns / 1ps
+
+module sheet #(
+    parameter integer WIDTH = 32,
+    parameter integer FRAC  = 16,
+    parameter integer GRID_W = 16,
+    parameter integer GRID_H = 16,
+    parameter integer NEURONS  = GRID_W * GRID_H,
+    parameter integer NEURON_ADDR_WIDTH = 8,
+    parameter integer TILE_W  = 4,
+    parameter integer TILE_H = 4
+)(
+    input wire clk,
+    input wire  rst,
+
+    input wire step_en,
+
+    input wire signed [WIDTH-1:0]  bias_in,
+
+    output reg spike_valid,
+    output reg [NEURON_ADDR_WIDTH-1:0]  spike_idx,
+    output reg signed [WIDTH-1:0] v_debug,
+
+    output reg frame_tick,
+
+    output reg [7:0]  tile_id_query
+);
+
+    localparam integer TILES_W = GRID_W / TILE_W;
+    localparam integer TILES_H  = GRID_H / TILE_H;
+    localparam integer NUM_TILES = TILES_W *  TILES_H;
+
+    reg signed [WIDTH-1:0] v_mem [0:NEURONS-1];
+    reg signed [WIDTH-1:0]  u_mem [0:NEURONS-1];
+    reg spike_mem [0:NEURONS-1];
+
+    reg signed [WIDTH-1:0] I_image_mem  [0:NEURONS-1];
+
+    reg [NEURON_ADDR_WIDTH-1:0] idx_curr;
+    reg [NEURON_ADDR_WIDTH-1:0]  idx_prev;
+    reg pipe_valid;
+
+    wire signed [WIDTH-1:0] v_pipe_out;
+    wire signed [WIDTH-1:0]  u_pipe_out;
+    wire spike_pipe_out;
+
+    reg signed [WIDTH-1:0] v_pipe_in;
+    reg signed [WIDTH-1:0] u_pipe_in;
+    reg signed [WIDTH-1:0]  I_pipe_in;
+
+    neuronalpipes #(
+        .WIDTH(WIDTH),
+        .FRAC(FRAC)
+    ) neuronalpipes_inst (
+        .clk(clk),
+        .rst(rst),
+        .en(step_en),
+        .v_in(v_pipe_in),
+        .u_in(u_pipe_in),
+        .I_in(I_pipe_in),
+        .v_out(v_pipe_out),
+        .u_out(u_pipe_out),
+        .spike_out(spike_pipe_out)
+    );
+
+    integer k;
+
+    initial begin
+        for (k = 0; k < NEURONS; k = k+1) begin
+            v_mem[k] = 0;
+            u_mem[k]  = 0;
+            spike_mem[k] = 1'b0;
+            I_image_mem[k]  = 0;
+        end
+    end
+
+    wire [NEURON_ADDR_WIDTH-1:0] idx_for_tile  = idx_curr;
+
+    wire [NEURON_ADDR_WIDTH-1:0] y = idx_for_tile /  GRID_W;
+    wire [NEURON_ADDR_WIDTH-1:0] x = idx_for_tile % GRID_W;
+
+    wire [NEURON_ADDR_WIDTH-1:0] tile_y = y /  TILE_H;
+    wire [NEURON_ADDR_WIDTH-1:0] tile_x = x / TILE_W;
+
+    wire [7:0] tile_id_wire = tile_y * TILES_W  + tile_x;
+
+    always @(posedge clk) begin
+        if (rst) begin
+            idx_curr <= 0;
+            idx_prev <=  0;
+            pipe_valid <= 1'b0;
+            spike_valid <=  1'b0;
+            spike_idx <= {NEURON_ADDR_WIDTH{1'b0}};
+            v_debug <= 0;
+            frame_tick <=  1'b0;
+            tile_id_query <= 8'd0;
+        end else if (step_en) begin
+            frame_tick <= 1'b0;
+            spike_valid <=  1'b0;
+
+            v_pipe_in <= v_mem[idx_curr];
+            u_pipe_in <=  u_mem[idx_curr];
+
+            I_pipe_in <= I_image_mem[idx_curr] + bias_in;
+
+            if (pipe_valid) begin
+                v_mem[idx_prev] <=  v_pipe_out;
+                u_mem[idx_prev] <= u_pipe_out;
+                spike_mem[idx_prev] <=  spike_pipe_out;
+
+                spike_valid <= spike_pipe_out;
+                spike_idx <=  idx_prev;
+                v_debug <= v_pipe_out;
+            end
+
+            idx_prev <= idx_curr;
+            pipe_valid <=  1'b1;
+
+            if (idx_curr == NEURONS - 1) begin
+                idx_curr <= 0;
+                frame_tick <=  1'b1;
+            end else begin
+                idx_curr <= idx_curr + 1;
+            end
+
+            tile_id_query <=  tile_id_wire;
+
+        end else begin
+            spike_valid <= 1'b0;
+            frame_tick <=  1'b0;
+        end
+    end
+
+endmodule

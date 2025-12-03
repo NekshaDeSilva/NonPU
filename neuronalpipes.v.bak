@@ -1,0 +1,72 @@
+`timescale 1ns / 1ps
+
+module neuronalpipes #(
+    parameter integer WIDTH  = 32,
+    parameter integer FRAC = 16
+)(
+    input wire clk,
+    input wire rst,
+    input wire  en,
+    input wire signed [WIDTH-1:0] v_in,
+    input wire signed [WIDTH-1:0]  u_in,
+    input wire signed [WIDTH-1:0] I_in,
+    output reg signed [WIDTH-1:0]  v_out,
+    output reg signed [WIDTH-1:0] u_out,
+    output reg spike_out
+);
+
+    localparam signed [WIDTH-1:0] A_PARAM  = 32'sd1311;
+    localparam signed [WIDTH-1:0] B_PARAM = 32'sd13107;
+    localparam signed [WIDTH-1:0]  C_PARAM = -32'sd4259840;
+    localparam signed [WIDTH-1:0] D_PARAM = 32'sd524288;
+    localparam signed [WIDTH-1:0] V_THRESH  = 32'sd1966080;
+
+    localparam signed [WIDTH-1:0] K_0_04 = 32'sd2621;
+    localparam signed [WIDTH-1:0]  K_5 = 32'sd327680;
+    localparam signed [WIDTH-1:0] K_140 = 32'sd9175040;
+
+    wire signed [2*WIDTH-1:0] v_sq_full = v_in *  v_in;
+    wire signed [WIDTH-1:0] v_sq = v_sq_full >>> FRAC;
+
+    wire signed [2*WIDTH-1:0] term_0_04_f = K_0_04  * v_sq;
+    wire signed [WIDTH-1:0] term_0_04 = term_0_04_f >>>  FRAC;
+
+    wire signed [2*WIDTH-1:0] term_5_v_f = K_5 * v_in;
+    wire signed [WIDTH-1:0] term_5_v  = term_5_v_f >>> FRAC;
+
+    wire signed [WIDTH-1:0] term_140 = K_140;
+
+    wire signed [WIDTH-1:0] dv_partial = term_0_04 + term_5_v  + term_140;
+    wire signed [WIDTH-1:0] dv = dv_partial -  u_in + I_in;
+
+    wire signed [WIDTH-1:0] v_next = v_in + dv;
+
+    wire signed [2*WIDTH-1:0] b_v_f  = B_PARAM * v_in;
+    wire signed [WIDTH-1:0] b_v = b_v_f >>> FRAC;
+
+    wire signed [WIDTH-1:0] b_v_minus_u = b_v  - u_in;
+
+    wire signed [2*WIDTH-1:0] du_f = A_PARAM *  b_v_minus_u;
+    wire signed [WIDTH-1:0] du = du_f >>> FRAC;
+
+    wire signed [WIDTH-1:0] u_next  = u_in + du;
+
+    always @(posedge clk) begin
+        if (rst) begin
+            v_out <=  C_PARAM;
+            u_out <= 0;
+            spike_out <= 1'b0;
+        end else if (en) begin
+            if (v_next >= V_THRESH) begin
+                spike_out <=  1'b1;
+                v_out <= C_PARAM;
+                u_out <= u_next +  D_PARAM;
+            end else begin
+                spike_out <= 1'b0;
+                v_out <=  v_next;
+                u_out <= u_next;
+            end
+        end
+    end
+
+endmodule

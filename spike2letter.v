@@ -1,0 +1,17 @@
+module spike2letter (
+    input              clk,
+    input              reset,
+    input      [7:0]   neuron_id,
+    input      [15:0]  voltage,
+    input              spike,
+    output reg [7:0]   letter
+);
+
+always @(posedge clk or posedge reset) begin
+    if (reset)
+        letter <= 8'd0;
+    else if (spike)
+        letter <= neuron_id;
+end
+
+endmodule

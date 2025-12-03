@@ -1,0 +1,22 @@
+module sheet (
+    input             clk,
+    input             reset,
+    output     [7:0]  spike_id,
+    output     [15:0] v_out
+);
+
+wire spike;
+wire [15:0] voltage;
+
+superneuron u_superneuron (
+    .clk(clk),
+    .reset(reset),
+    .input_current(16'd10),
+    .spike(spike),
+    .voltage(voltage)
+);
+
+assign spike_id = spike ? 8'd1 : 8'd0;
+assign v_out    = voltage;
+
+endmodule

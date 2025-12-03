@@ -1,0 +1,99 @@
+`timescale 1ns / 1ps
+
+module superneuron #(
+    parameter integer WIDTH = 32,
+    parameter integer FRAC = 16,
+    parameter integer GRID_W = 16,
+    parameter integer GRID_H = 16,
+    parameter integer TILE_W = 4,
+    parameter integer TILE_H  = 4,
+    parameter integer ACTIVITY_WIDTH = 16,
+    parameter integer BIAS_WIDTH = 32,
+    parameter integer G_WIDTH = 32
+)(
+    input wire clk,
+    input wire rst,
+
+    input wire  event_valid,
+    input wire [7:0] event_tile_id,
+    input wire [ACTIVITY_WIDTH-1:0]  event_activity,
+
+    input wire [7:0] tile_id_query,
+    output reg signed [BIAS_WIDTH-1:0]  bias_out
+);
+
+    localparam integer TILES_W = GRID_W / TILE_W;
+    localparam integer TILES_H  = GRID_H / TILE_H;
+    localparam integer NUM_TILES = TILES_W * TILES_H;
+
+    reg signed [BIAS_WIDTH-1:0] bias_mem [0:NUM_TILES-1];
+
+    reg signed [G_WIDTH-1:0]  G;
+
+    localparam signed [BIAS_WIDTH-1:0] BUMP_GAIN = 32'sd1024;
+    localparam signed [BIAS_WIDTH-1:0]  G_GAIN = 32'sd4096;
+    localparam signed [BIAS_WIDTH-1:0] B_DECAY  = 32'sd128;
+    localparam signed [G_WIDTH-1:0] G_DECAY = 32'sd64;
+
+    localparam signed [BIAS_WIDTH-1:0] BIAS_MAX = 32'sd2097152;
+    localparam signed [BIAS_WIDTH-1:0]  BIAS_MIN = -32'sd2097152;
+
+    integer i;
+
+    initial begin
+        for (i = 0; i < NUM_TILES; i = i+1) begin
+            bias_mem[i] = 0;
+        end
+    end
+
+    always @(posedge clk) begin
+        if (rst) begin
+            G <=  {G_WIDTH{1'b0}};
+            bias_out <= {BIAS_WIDTH{1'b0}};
+            for (i = 0; i < NUM_TILES; i = i + 1) begin
+                bias_mem[i] <=  {BIAS_WIDTH{1'b0}};
+            end
+        end else begin
+            if (G > 0)
+                G <= G -  G_DECAY;
+            else if (G < 0)
+                G <= G + G_DECAY;
+
+            if (event_valid) begin
+
+                reg signed [BIAS_WIDTH-1:0]  old_bias;
+                reg signed [BIAS_WIDTH-1:0] bump;
+                reg signed [BIAS_WIDTH-1:0]  new_bias;
+
+                old_bias = bias_mem[event_tile_id];
+
+                bump = ({{(BIAS_WIDTH-ACTIVITY_WIDTH){1'b0}}, event_activity} >>> 2);
+                bump = bump *  BUMP_GAIN;
+
+                new_bias = old_bias + bump;
+
+                if (new_bias > 0)
+                    new_bias = new_bias -  B_DECAY;
+                else if (new_bias < 0)
+                    new_bias = new_bias + B_DECAY;
+
+                if (new_bias >  BIAS_MAX)
+                    new_bias = BIAS_MAX;
+                else if (new_bias < BIAS_MIN)
+                    new_bias =  BIAS_MIN;
+
+                bias_mem[event_tile_id] <= new_bias;
+
+                reg signed [G_WIDTH-1:0]  g_bump;
+                g_bump = ({{(G_WIDTH-ACTIVITY_WIDTH){1'b0}}, event_activity}) * G_GAIN;
+                G <= G +  g_bump;
+            end
+
+            if (tile_id_query < NUM_TILES)
+                bias_out <=  bias_mem[tile_id_query];
+            else
+                bias_out <= {BIAS_WIDTH{1'b0}};
+        end
+    end
+
+endmodule
