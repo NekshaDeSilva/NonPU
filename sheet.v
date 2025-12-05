@@ -20,3 +20,5 @@ assign spike_id = spike ? 8'd1 : 8'd0;
 assign v_out    = voltage;
 
 endmodule
+
+// 2025-12-05 14:10:00
