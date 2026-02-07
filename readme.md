@@ -4,22 +4,4 @@ Neuronal Processing Unit with Time-Multiplexed Neuronal Core and Custom Super Ne
 
 Version 0.1
 
-<!-- 2025-12-07 15:13:00 -->
-
-<!-- 2025-12-12 11:02:00 -->
-
-<!-- 2025-12-16 16:03:00 -->
-
-<!-- 2025-12-21 11:01:00 -->
-
-<!-- 2025-12-25 16:49:00 -->
-
-<!-- 2025-12-30 10:17:00 -->
-
-<!-- 2026-01-03 15:07:00 -->
-
-<!-- 2026-01-24 16:45:00 -->
-
-<!-- 2026-02-02 12:25:00 -->
-
-<!-- 2026-02-04 10:02:00 -->
+Upcoming: Software for programming the Neuronal Processing Units is in development. It will be entirely written in C++ and will run on Microsoft Windows 7,8,10 or higher.
